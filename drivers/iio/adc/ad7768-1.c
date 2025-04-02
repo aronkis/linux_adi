@@ -1362,6 +1362,7 @@ static int ad7768_buffer_predisable(struct iio_dev *indio_dev)
 	 * To exit continuous read mode, perform a single read of the ADC_DATA
 	 * reg (0x2C), which allows further configuration of the device.
 	 */
+	regmap_read(st->regmap24, AD7768_REG24_ADC_DATA, &unused);
 	return regmap_read(st->regmap24, AD7768_REG24_ADC_DATA, &unused);
 }
 
