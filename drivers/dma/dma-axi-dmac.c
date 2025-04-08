@@ -6,6 +6,8 @@
  *  Author: Lars-Peter Clausen <lars@metafoo.de>
  */
 
+#include "linux/list.h"
+#include "linux/stddef.h"
 #include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/device.h>
@@ -69,7 +71,9 @@
 #define AXI_DMAC_REG_START_TRANSFER	0x408
 #define AXI_DMAC_REG_FLAGS		0x40c
 #define AXI_DMAC_REG_DEST_ADDRESS	0x410
+#define AXI_DMAC_REG_DEST_ADDRESS_HIGH	0x490
 #define AXI_DMAC_REG_SRC_ADDRESS	0x414
+#define AXI_DMAC_REG_SRC_ADDRESS_HIGH	0x494
 #define AXI_DMAC_REG_X_LENGTH		0x418
 #define AXI_DMAC_REG_Y_LENGTH		0x41c
 #define AXI_DMAC_REG_DEST_STRIDE	0x420
@@ -134,6 +138,7 @@ struct axi_dmac_desc {
 	struct axi_dmac_chan *chan;
 
 	bool cyclic;
+	bool cyclic_eot;
 	bool have_partial_xfer;
 
 	unsigned int num_submitted;
@@ -227,14 +232,77 @@ static bool axi_dmac_check_addr(struct axi_dmac_chan *chan, dma_addr_t addr)
 	return true;
 }
 
+static struct axi_dmac_desc *axi_dmac_active_desc(struct axi_dmac_chan *chan)
+{
+	return list_first_entry_or_null(&chan->active_descs,
+					struct axi_dmac_desc, vdesc.node);
+}
+
+static struct axi_dmac_desc *axi_dmac_get_next_desc(struct axi_dmac *dmac,
+						    struct axi_dmac_chan *chan)
+{
+	struct axi_dmac_desc *active = axi_dmac_active_desc(chan);
+	struct virt_dma_desc *vdesc;
+	struct axi_dmac_desc *desc;
+	unsigned int val;
+
+	/*
+	 * Just play safe and ignore any SOF if we have an active cyclic transfer
+	 * flagged to end. We'll start it as soon as the current cyclic on ends.
+	 */
+	if (active && active->cyclic_eot)
+		return NULL;
+
+	if (chan->next_desc)
+		return chan->next_desc;
+
+	vdesc = vchan_next_desc(&chan->vchan);
+	if (!vdesc)
+		return NULL;
+
+	if (active && active->cyclic && !(vdesc->tx.flags & DMA_PREP_LOAD_EOT)) {
+		list_del(&vdesc->node);
+		return NULL;
+	}
+
+	desc = to_axi_dmac_desc(vdesc);
+	list_move_tail(&vdesc->node, &chan->active_descs);
+	chan->next_desc = desc;
+
+	if (!active || !active->cyclic)
+		return desc;
+
+	active->cyclic_eot = true;
+	if (chan->hw_sg) {
+		unsigned long flags = AXI_DMAC_HW_FLAG_IRQ | AXI_DMAC_HW_FLAG_LAST;
+		/*
+		 * Let's then stop the current cyclic transfer by making sure we
+		 * get an EOT interrupt and to open the cyclic loop by marking
+		 * the last segment.
+		 */
+		active->sg[active->num_sgs - 1].hw->flags = flags;
+		return NULL;
+	}
+
+	/* Clear the cyclic bit if there's no SG hw */
+	val = axi_dmac_read(dmac, AXI_DMAC_REG_FLAGS);
+	val &= ~AXI_DMAC_FLAG_CYCLIC;
+	axi_dmac_write(dmac, AXI_DMAC_REG_FLAGS, val);
+
+	return NULL;
+}
+
 static void axi_dmac_start_transfer(struct axi_dmac_chan *chan)
 {
 	struct axi_dmac *dmac = chan_to_axi_dmac(chan);
-	struct virt_dma_desc *vdesc;
 	struct axi_dmac_desc *desc;
 	struct axi_dmac_sg *sg;
 	unsigned int flags = 0;
 	unsigned int val;
+
+	desc = axi_dmac_get_next_desc(dmac, chan);
+	if (!desc)
+		return;
 
 	if (!chan->hw_sg) {
 		val = axi_dmac_read(dmac, AXI_DMAC_REG_START_TRANSFER);
@@ -242,15 +310,6 @@ static void axi_dmac_start_transfer(struct axi_dmac_chan *chan)
 			return;
 	}
 
-	desc = chan->next_desc;
-
-	if (!desc) {
-		vdesc = vchan_next_desc(&chan->vchan);
-		if (!vdesc)
-			return;
-		list_move_tail(&vdesc->node, &chan->active_descs);
-		desc = to_axi_dmac_desc(vdesc);
-	}
 	sg = &desc->sg[desc->num_submitted];
 
 	/* Already queued in cyclic mode. Wait for it to finish */
@@ -268,8 +327,6 @@ static void axi_dmac_start_transfer(struct axi_dmac_chan *chan)
 		else
 			chan->next_desc = NULL;
 		flags |= AXI_DMAC_FLAG_LAST;
-	} else {
-		chan->next_desc = desc;
 	}
 
 	sg->hw->id = axi_dmac_read(dmac, AXI_DMAC_REG_TRANSFER_ID);
@@ -277,11 +334,14 @@ static void axi_dmac_start_transfer(struct axi_dmac_chan *chan)
 	if (!chan->hw_sg) {
 		if (axi_dmac_dest_is_mem(chan)) {
 			axi_dmac_write(dmac, AXI_DMAC_REG_DEST_ADDRESS, sg->hw->dest_addr);
+			axi_dmac_write(dmac, AXI_DMAC_REG_DEST_ADDRESS_HIGH,
+				       sg->hw->dest_addr >> 32);
 			axi_dmac_write(dmac, AXI_DMAC_REG_DEST_STRIDE, sg->hw->dst_stride);
 		}
 
 		if (axi_dmac_src_is_mem(chan)) {
 			axi_dmac_write(dmac, AXI_DMAC_REG_SRC_ADDRESS, sg->hw->src_addr);
+			axi_dmac_write(dmac, AXI_DMAC_REG_SRC_ADDRESS_HIGH, sg->hw->src_addr >> 32);
 			axi_dmac_write(dmac, AXI_DMAC_REG_SRC_STRIDE, sg->hw->src_stride);
 		}
 	}
@@ -291,10 +351,12 @@ static void axi_dmac_start_transfer(struct axi_dmac_chan *chan)
 	 * call, enable hw cyclic mode to avoid unnecessary interrupts.
 	 */
 	if (chan->hw_cyclic && desc->cyclic && !desc->vdesc.tx.callback) {
-		if (chan->hw_sg)
+		if (chan->hw_sg) {
 			desc->sg[desc->num_sgs - 1].hw->flags &= ~AXI_DMAC_HW_FLAG_IRQ;
-		else if (desc->num_sgs == 1)
+		} else if (desc->num_sgs == 1) {
 			flags |= AXI_DMAC_FLAG_CYCLIC;
+			chan->next_desc = NULL;
+		}
 	}
 
 	if (chan->hw_partial_xfer)
@@ -310,12 +372,6 @@ static void axi_dmac_start_transfer(struct axi_dmac_chan *chan)
 	}
 	axi_dmac_write(dmac, AXI_DMAC_REG_FLAGS, flags);
 	axi_dmac_write(dmac, AXI_DMAC_REG_START_TRANSFER, 1);
-}
-
-static struct axi_dmac_desc *axi_dmac_active_desc(struct axi_dmac_chan *chan)
-{
-	return list_first_entry_or_null(&chan->active_descs,
-		struct axi_dmac_desc, vdesc.node);
 }
 
 static inline unsigned int axi_dmac_total_sg_bytes(struct axi_dmac_chan *chan,
@@ -398,6 +454,44 @@ static void axi_dmac_compute_residue(struct axi_dmac_chan *chan,
 	}
 }
 
+static bool axi_dmac_handle_cyclic_eot(struct axi_dmac_chan *chan,
+				       struct axi_dmac_desc *active)
+{
+	struct device *dev = chan_to_axi_dmac(chan)->dma_dev.dev;
+	struct virt_dma_desc *vdesc;
+
+	/* wrap around */
+	active->num_completed = 0;
+
+	if (active->cyclic_eot) {
+		dev_info(dev, "HW cyclic transfer cancelled at sof\n");
+		list_del(&active->vdesc.node);
+		vchan_cookie_complete(&active->vdesc);
+		/*
+		 * We know we have something to schedule, so start the next
+		 * transfer now the cyclic one is done.
+		 */
+		return true;
+	}
+
+	vdesc = vchan_next_desc(&chan->vchan);
+	if (!vdesc)
+		return false;
+	if (!(vdesc->tx.flags & DMA_PREP_LOAD_EOT)) {
+		dev_warn(dev, "Discarding non EOT transfer after cyclic\n");
+		list_del(&vdesc->node);
+		return false;
+	}
+
+	/* then let's end the cyclic transfer */
+	dev_info(dev, "Cancel SW cyclic transfer\n");
+	chan->next_desc = NULL;
+	list_del(&active->vdesc.node);
+	vchan_cookie_complete(&active->vdesc);
+	/* same as above */
+	return true;
+}
+
 static bool axi_dmac_transfer_done(struct axi_dmac_chan *chan,
 	unsigned int completed_transfers)
 {
@@ -415,6 +509,12 @@ static bool axi_dmac_transfer_done(struct axi_dmac_chan *chan,
 
 	if (chan->hw_sg) {
 		if (active->cyclic) {
+			if (active->cyclic_eot) {
+				list_del(&active->vdesc.node);
+				vchan_cookie_complete(&active->vdesc);
+				return true;
+			}
+
 			vchan_cyclic_callback(&active->vdesc);
 		} else {
 			list_del(&active->vdesc.node);
@@ -445,7 +545,8 @@ static bool axi_dmac_transfer_done(struct axi_dmac_chan *chan,
 			if (active->num_completed == active->num_sgs ||
 			    sg->partial_len) {
 				if (active->cyclic) {
-					active->num_completed = 0; /* wrap around */
+					/* keep start_next as is, if already true... */
+					start_next |= axi_dmac_handle_cyclic_eot(chan, active);
 				} else {
 					list_del(&active->vdesc.node);
 					vchan_cookie_complete(&active->vdesc);
@@ -494,6 +595,7 @@ static int axi_dmac_terminate_all(struct dma_chan *c)
 	LIST_HEAD(head);
 
 	spin_lock_irqsave(&chan->vchan.lock, flags);
+	dev_info(dmac->dma_dev.dev, "kill all DMA\n");
 	axi_dmac_write(dmac, AXI_DMAC_REG_CTRL, 0);
 	chan->next_desc = NULL;
 	vchan_get_all_descriptors(&chan->vchan, &head);
@@ -662,7 +764,12 @@ axi_dmac_prep_peripheral_dma_vec(struct dma_chan *c, const struct dma_vec *vecs,
 					      vecs[i].len, dsg);
 	}
 
-	desc->cyclic = false;
+	desc->cyclic = !!(flags & DMA_PREP_REPEAT);
+	if (desc->cyclic) {
+		desc->sg[num_sgs - 1].hw->flags &= ~AXI_DMAC_HW_FLAG_LAST;
+		/* close the loop */
+		desc->sg[num_sgs - 1].hw->next_sg_addr = desc->sg[0].hw_phys;
+	}
 
 	return vchan_tx_prep(&chan->vchan, &desc->vdesc, flags);
 }
@@ -1019,6 +1126,9 @@ static int axi_dmac_read_chan_config(struct device *dev, struct axi_dmac *dmac)
 static int axi_dmac_detect_caps(struct axi_dmac *dmac, unsigned int version)
 {
 	struct axi_dmac_chan *chan = &dmac->chan;
+	struct device *dev = dmac->dma_dev.dev;
+	u32 mask;
+	int ret;
 
 	axi_dmac_write(dmac, AXI_DMAC_REG_FLAGS, AXI_DMAC_FLAG_CYCLIC);
 	if (axi_dmac_read(dmac, AXI_DMAC_REG_FLAGS) == AXI_DMAC_FLAG_CYCLIC)
@@ -1051,6 +1161,24 @@ static int axi_dmac_detect_caps(struct axi_dmac *dmac, unsigned int version)
 		dev_err(dmac->dma_dev.dev,
 			"Source memory-mapped interface not supported.");
 		return -ENODEV;
+	}
+
+	if (axi_dmac_dest_is_mem(chan)) {
+		axi_dmac_write(dmac, AXI_DMAC_REG_DEST_ADDRESS_HIGH, 0xffffffff);
+		mask = axi_dmac_read(dmac, AXI_DMAC_REG_DEST_ADDRESS_HIGH);
+	} else {
+		axi_dmac_write(dmac, AXI_DMAC_REG_SRC_ADDRESS_HIGH, 0xffffffff);
+		mask = axi_dmac_read(dmac, AXI_DMAC_REG_SRC_ADDRESS_HIGH);
+	}
+
+	dev_info(dev, "DMA mask addr: %x bits\n", mask);
+	mask = 32 + fls(mask);
+	dev_info(dev, "DMA mask: %u bits\n", mask);
+
+	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(mask));
+	if (ret) {
+		dev_err(dev, "DMA mask error %d\n", ret);
+		return ret;
 	}
 
 	if (version >= ADI_AXI_PCORE_VER(4, 2, 'a'))

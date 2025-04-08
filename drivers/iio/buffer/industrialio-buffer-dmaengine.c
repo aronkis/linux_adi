@@ -106,9 +106,12 @@ int iio_dmaengine_buffer_submit_block(struct iio_dma_buffer_queue *queue,
 	} else {
 		desc = dmaengine_prep_slave_single(dmaengine_buffer->chan,
 			block->phys_addr, block->block.bytes_used, dma_dir,
-			DMA_PREP_INTERRUPT);
+			DMA_PREP_INTERRUPT | DMA_PREP_LOAD_EOT);
 		if (!desc)
 			return -ENOMEM;
+
+		desc->callback_result = iio_dmaengine_buffer_block_done;
+		desc->callback_param = block;
 	}
 #else
 	max_size = min(block->size, dmaengine_buffer->max_size);
@@ -120,6 +123,8 @@ int iio_dmaengine_buffer_submit_block(struct iio_dma_buffer_queue *queue,
 		dma_dir = DMA_MEM_TO_DEV;
 
 	if (block->sg_table) {
+		unsigned long flags;
+
 		sgl = block->sg_table->sgl;
 		nents = sg_nents_for_len(sgl, block->bytes_used);
 		if (nents < 0)
@@ -144,9 +149,14 @@ int iio_dmaengine_buffer_submit_block(struct iio_dma_buffer_queue *queue,
 			sgl = sg_next(sgl);
 		}
 
+		if (block->cyclic)
+			flags = DMA_PREP_REPEAT;
+		else
+			flags = DMA_PREP_INTERRUPT | DMA_PREP_LOAD_EOT;
+
 		desc = dmaengine_prep_peripheral_dma_vec(dmaengine_buffer->chan,
 							 vecs, nents, dma_dir,
-							 DMA_PREP_INTERRUPT);
+							 flags);
 		kfree(vecs);
 	} else {
 		if (queue->buffer.direction == IIO_BUFFER_DIRECTION_IN)
@@ -155,18 +165,28 @@ int iio_dmaengine_buffer_submit_block(struct iio_dma_buffer_queue *queue,
 		if (!block->bytes_used || block->bytes_used > max_size)
 			return -EINVAL;
 
-		desc = dmaengine_prep_slave_single(dmaengine_buffer->chan,
-						   block->phys_addr,
-						   block->bytes_used,
-						   dma_dir,
-						   DMA_PREP_INTERRUPT);
+		if (block->cyclic)
+			desc = dmaengine_prep_dma_cyclic(dmaengine_buffer->chan,
+							 block->phys_addr,
+							 block->bytes_used,
+							 block->bytes_used,
+							 dma_dir,
+							 DMA_PREP_LOAD_EOT);
+		else
+			desc = dmaengine_prep_slave_single(dmaengine_buffer->chan,
+							   block->phys_addr,
+							   block->bytes_used,
+							   dma_dir,
+							   DMA_PREP_INTERRUPT);
 	}
+
 	if (!desc)
 		return -ENOMEM;
+	if (!block->cyclic) {
+		desc->callback_result = iio_dmaengine_buffer_block_done;
+		desc->callback_param = block;
+	}
 #endif
-	desc->callback_result = iio_dmaengine_buffer_block_done;
-	desc->callback_param = block;
-
 	cookie = dmaengine_submit(desc);
 	if (dma_submit_error(cookie))
 		return dma_submit_error(cookie);
@@ -186,6 +206,7 @@ void iio_dmaengine_buffer_abort(struct iio_dma_buffer_queue *queue)
 	struct dmaengine_buffer *dmaengine_buffer =
 		iio_buffer_to_dmaengine_buffer(&queue->buffer);
 
+	dev_info(queue->dev, "Aborting DMA transfer\n");
 	dmaengine_terminate_sync(dmaengine_buffer->chan);
 	iio_dma_buffer_block_list_abort(queue, &dmaengine_buffer->active);
 }
@@ -219,6 +240,7 @@ static const struct iio_buffer_access_funcs iio_dmaengine_buffer_ops = {
 	.dequeue_block = iio_dma_buffer_dequeue_block,
 	.mmap = iio_dma_buffer_mmap,
 #else
+	.get_dma_dev = iio_dma_buffer_get_dma_dev,
 	.enqueue_dmabuf = iio_dma_buffer_enqueue_dmabuf,
 	.attach_dmabuf = iio_dma_buffer_attach_dmabuf,
 	.detach_dmabuf = iio_dma_buffer_detach_dmabuf,

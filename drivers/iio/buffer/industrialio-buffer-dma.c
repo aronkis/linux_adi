@@ -109,6 +109,7 @@ static void iio_buffer_block_release(struct kref *kref)
 	WARN_ON(block->fileio && block->state != IIO_BLOCK_STATE_DEAD);
 
 #ifdef CONFIG_IIO_DMA_BUF_MMAP_LEGACY
+	dev_info(block->queue->dev, "Freeing block %p\n", block);
 	dma_free_coherent(block->queue->dev, PAGE_ALIGN(block->block.size),
 					block->vaddr, block->phys_addr);
 #else
@@ -266,6 +267,10 @@ void iio_dma_buffer_block_done(struct iio_dma_buffer_block *block)
 	if (!block->fileio)
 		iio_buffer_signal_dmabuf_done(block->fence, 0);
 #endif
+	/* The below is likely the issue (or can also be one). We only enqueue once
+	 * (kref_get() and might do iio_buffer_block_put_atomic(kref_put()) multiple
+	 * times leading to a use after free. Check this tomorrow!!
+	 */
 	iio_buffer_block_put_atomic(block);
 	iio_dma_buffer_queue_wake(queue);
 #ifndef CONFIG_IIO_DMA_BUF_MMAP_LEGACY
@@ -1140,6 +1145,12 @@ out_end_signalling:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(iio_dma_buffer_enqueue_dmabuf);
+
+struct device *iio_dma_buffer_get_dma_dev(struct iio_buffer *buffer)
+{
+	return iio_buffer_to_queue(buffer)->dev;
+}
+EXPORT_SYMBOL_GPL(iio_dma_buffer_get_dma_dev);
 
 void iio_dma_buffer_lock_queue(struct iio_buffer *buffer)
 {
