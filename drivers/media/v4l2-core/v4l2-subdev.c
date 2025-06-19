@@ -985,6 +985,7 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg,
 		struct v4l2_subdev_route *routes =
 			(struct v4l2_subdev_route *)(uintptr_t)routing->routes;
 		struct v4l2_subdev_krouting krouting = {};
+		unsigned int num_active_routes = 0;
 		unsigned int i;
 
 		if (!(sd->flags & V4L2_SUBDEV_FL_STREAMS))
@@ -1019,7 +1020,20 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg,
 			if (!(pads[route->source_pad].flags &
 			      MEDIA_PAD_FL_SOURCE))
 				return -EINVAL;
+
+			if (route->flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE)
+				num_active_routes++;
 		}
+
+		/*
+		 * Drivers that implement routing need to report a frame
+		 * descriptor accordingly, with up to one entry per route. Until
+		 * the frame descriptors entries get allocated dynamically,
+		 * limit the number of active routes to
+		 * V4L2_FRAME_DESC_ENTRY_MAX.
+		 */
+		if (num_active_routes > V4L2_FRAME_DESC_ENTRY_MAX)
+			return -E2BIG;
 
 		/*
 		 * If the driver doesn't support setting routing, just return
