@@ -185,6 +185,7 @@ enum hwmon_curr_attributes {
 	hwmon_curr_rated_min,
 	hwmon_curr_rated_max,
 	hwmon_curr_beep,
+	hwmon_curr_fault,
 };
 
 #define HWMON_C_ENABLE		BIT(hwmon_curr_enable)
@@ -206,6 +207,7 @@ enum hwmon_curr_attributes {
 #define HWMON_C_RATED_MIN	BIT(hwmon_curr_rated_min)
 #define HWMON_C_RATED_MAX	BIT(hwmon_curr_rated_max)
 #define HWMON_C_BEEP		BIT(hwmon_curr_beep)
+#define HWMON_C_FAULT		BIT(hwmon_curr_fault)
 
 enum hwmon_power_attributes {
 	hwmon_power_enable,
