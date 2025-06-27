@@ -638,6 +638,7 @@ static const char * const hwmon_curr_attr_templates[] = {
 	[hwmon_curr_rated_min] = "curr%d_rated_min",
 	[hwmon_curr_rated_max] = "curr%d_rated_max",
 	[hwmon_curr_beep] = "curr%d_beep",
+	[hwmon_curr_fault] = "curr%d_fault",
 };
 
 static const char * const hwmon_power_attr_templates[] = {
