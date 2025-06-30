@@ -776,6 +776,23 @@ int ad9088_iio_str_to_val(const char *str, int min, int max, int *val)
 	return ret;
 }
 
+static int ad9088_iio_write_channel_ext_info(struct ad9088_phy *phy, struct iio_channel *chan,
+					     const char *ext_name, long long val)
+{
+	ssize_t size;
+	char str[16];
+
+	snprintf(str, sizeof(str), "%lld\n", val);
+
+	size = iio_write_channel_ext_info(chan, ext_name, str, sizeof(str));
+	if (size != sizeof(str)) {
+		dev_err(&phy->spi->dev, "%s: Failed to write channel ext info\n", __func__);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int ad9088_nyquist_zone_read(struct iio_dev *indio_dev,
 				    const struct iio_chan_spec *chan)
 {
@@ -5256,23 +5273,6 @@ static int ad9088_jesd204_link_setup(struct jesd204_dev *jdev,
 	}
 
 	return JESD204_STATE_CHANGE_DONE;
-}
-
-static int ad9088_iio_write_channel_ext_info(struct ad9088_phy *phy, struct iio_channel *chan,
-					     const char *ext_name, long long val)
-{
-	ssize_t size;
-	char str[16];
-
-	snprintf(str, sizeof(str), "%lld\n", val);
-
-	size = iio_write_channel_ext_info(chan, ext_name, str, sizeof(str));
-	if (size != sizeof(str)) {
-		dev_err(&phy->spi->dev, "%s: Failed to write channel ext info\n", __func__);
-		return -EINVAL;
-	}
-
-	return 0;
 }
 
 static int ad9088_jesd204_setup_stage1(struct jesd204_dev *jdev,
