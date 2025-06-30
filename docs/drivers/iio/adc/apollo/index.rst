@@ -823,6 +823,22 @@ If the ADC and DAC does not have the same sampling frequency, writing will
 fail with -EINVAL.
 Consult the User Guide for all configuration requirements before enabling the loopback.
 
+.. TODO currently ch1, ch3 does not work with lb3_jesd, reads all zeros.
+
+FSRC
+^^^^
+
+Value M and N depend on each other and a new range is only configured when
+N/M is between 1 less than 2.
+Writing N == M puts the FSRC in 1X Mode.
+Using FSRC without an external trigger is not supported.
+
+.. shell::
+   /sys/bus/iio/devices/iio:device8
+   $ls | grep fsrc
+    ...
+   $echo 10 6 > in_voltage0_i_fsrc_n_m
+
 Test mode
 ^^^^^^^^^
 
