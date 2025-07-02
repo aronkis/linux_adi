@@ -6309,7 +6309,6 @@ static int ad9088_probe(struct spi_device *spi)
 	struct ad9088_jesd204_priv *priv;
 	struct gpio_desc *gpio;
 	struct clock_scale devclk_clkscale;
-	struct device_node *node = spi->dev.of_node;
 	u16 api_rev[3];
 	int ret;
 
