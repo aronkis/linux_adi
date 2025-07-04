@@ -24,8 +24,8 @@
 #define MAX_DES_LINK_FREQUENCY_DEFAULT		750000000ull
 #define MAX_DES_LINK_FREQUENCY_MAX		1250000000ull
 
-#define MAX_DES_PHYS_NUM			4
-#define MAX_DES_PIPES_NUM			8
+#define MAX_DES_NUM_PHYS			4
+#define MAX_DES_NUM_PIPES			8
 
 struct max_des_priv {
 	struct max_des *des;
@@ -53,24 +53,24 @@ struct max_des_remap_context {
 	/* Mark whether TPG is enabled */
 	bool tpg;
 	/* Mark the PHYs to which each pipe is mapped. */
-	unsigned long pipe_phy_masks[MAX_DES_PIPES_NUM];
+	unsigned long pipe_phy_masks[MAX_DES_NUM_PIPES];
 	/* Mark the pipes in use. */
-	bool pipe_in_use[MAX_DES_PIPES_NUM];
+	bool pipe_in_use[MAX_DES_NUM_PIPES];
 	/* Mark whether pipe has remapped VC ids. */
-	bool vc_ids_remapped[MAX_DES_PIPES_NUM];
+	bool vc_ids_remapped[MAX_DES_NUM_PIPES];
 	/* Map between pipe VC ids and PHY VC ids. */
-	unsigned int vc_ids_map[MAX_DES_PIPES_NUM][MAX_DES_PHYS_NUM][MAX_SERDES_VC_ID_NUM];
+	unsigned int vc_ids_map[MAX_DES_NUM_PIPES][MAX_DES_NUM_PHYS][MAX_SERDES_VC_ID_NUM];
 	/* Mark whether a pipe VC id has been mapped to a PHY VC id. */
-	unsigned long vc_ids_masks[MAX_DES_PIPES_NUM][MAX_DES_PHYS_NUM];
+	unsigned long vc_ids_masks[MAX_DES_NUM_PIPES][MAX_DES_NUM_PHYS];
 	/* Mark whether a PHY VC id has been mapped. */
-	unsigned long dst_vc_ids_masks[MAX_DES_PHYS_NUM];
+	unsigned long dst_vc_ids_masks[MAX_DES_NUM_PHYS];
 };
 
 struct max_des_mode_context {
-	bool phys_bpp8_shared_with_16[MAX_DES_PHYS_NUM];
-	bool pipes_bpp8_shared_with_16[MAX_DES_PIPES_NUM];
-	u32 phys_double_bpps[MAX_DES_PHYS_NUM];
-	u32 pipes_double_bpps[MAX_DES_PIPES_NUM];
+	bool phys_bpp8_shared_with_16[MAX_DES_NUM_PHYS];
+	bool pipes_bpp8_shared_with_16[MAX_DES_NUM_PIPES];
+	u32 phys_double_bpps[MAX_DES_NUM_PHYS];
+	u32 pipes_double_bpps[MAX_DES_NUM_PIPES];
 };
 
 struct max_des_route_hw {
@@ -598,9 +598,9 @@ static int max_des_populate_mode_context(struct max_des_priv *priv,
 					 struct v4l2_subdev_state *state,
 					 enum max_serdes_gmsl_mode mode)
 {
-	bool bpp8_not_shared_with_16_phys[MAX_DES_PHYS_NUM] = { 0 };
-	u32 undoubled_bpps_phys[MAX_DES_PHYS_NUM] = { 0 };
-	u32 bpps_pipes[MAX_DES_PIPES_NUM] = { 0 };
+	bool bpp8_not_shared_with_16_phys[MAX_DES_NUM_PHYS] = { 0 };
+	u32 undoubled_bpps_phys[MAX_DES_NUM_PHYS] = { 0 };
+	u32 bpps_pipes[MAX_DES_NUM_PIPES] = { 0 };
 	struct max_des *des = priv->des;
 	struct v4l2_subdev_route *route;
 	unsigned int i;
@@ -3027,10 +3027,10 @@ int max_des_probe(struct i2c_client *client, struct max_des *des)
 	struct max_des_priv *priv;
 	int ret;
 
-	if (des->ops->num_phys > MAX_DES_PHYS_NUM)
+	if (des->ops->num_phys > MAX_DES_NUM_PHYS)
 		return -E2BIG;
 
-	if (des->ops->num_pipes > MAX_DES_PIPES_NUM)
+	if (des->ops->num_pipes > MAX_DES_NUM_PIPES)
 		return -E2BIG;
 
 	if (des->ops->num_links > des->ops->num_pipes)
