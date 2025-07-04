@@ -25,6 +25,7 @@
 #define MAX_DES_LINK_FREQUENCY_MAX		1250000000ull
 
 #define MAX_DES_NUM_PHYS			4
+#define MAX_DES_NUM_LINKS			4
 #define MAX_DES_NUM_PIPES			8
 
 struct max_des_priv {
@@ -3031,6 +3032,9 @@ int max_des_probe(struct i2c_client *client, struct max_des *des)
 		return -E2BIG;
 
 	if (des->ops->num_pipes > MAX_DES_NUM_PIPES)
+		return -E2BIG;
+
+	if (des->ops->num_links > MAX_DES_NUM_LINKS)
 		return -E2BIG;
 
 	if (des->ops->num_links > des->ops->num_pipes)
