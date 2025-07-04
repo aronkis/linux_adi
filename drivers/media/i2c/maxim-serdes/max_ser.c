@@ -1319,8 +1319,8 @@ static int max_ser_init_state(struct v4l2_subdev *sd,
 	return max_ser_set_routing(sd, state, V4L2_SUBDEV_FORMAT_ACTIVE, &routing);
 }
 
-#ifdef CONFIG_VIDEO_ADV_DEBUG
-static int max_ser_g_register(struct v4l2_subdev *sd, struct v4l2_dbg_register *reg)
+static int __maybe_unused max_ser_g_register(struct v4l2_subdev *sd,
+					     struct v4l2_dbg_register *reg)
 {
 	struct max_ser_priv *priv = sd_to_priv(sd);
 	struct max_ser *ser = priv->ser;
@@ -1337,14 +1337,14 @@ static int max_ser_g_register(struct v4l2_subdev *sd, struct v4l2_dbg_register *
 	return 0;
 }
 
-static int max_ser_s_register(struct v4l2_subdev *sd, const struct v4l2_dbg_register *reg)
+static int __maybe_unused max_ser_s_register(struct v4l2_subdev *sd,
+					     const struct v4l2_dbg_register *reg)
 {
 	struct max_ser_priv *priv = sd_to_priv(sd);
 	struct max_ser *ser = priv->ser;
 
 	return ser->ops->reg_write(ser, reg->reg, reg->val);
 }
-#endif
 
 static const struct v4l2_subdev_core_ops max_ser_core_ops = {
 	.log_status = max_ser_log_status,
