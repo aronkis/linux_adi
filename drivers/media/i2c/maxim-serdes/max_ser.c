@@ -19,6 +19,7 @@
 #include "max_serdes.h"
 
 #define MAX_SER_NUM_LINKS	1
+#define MAX_SER_NUM_PHYS	1
 
 struct max_ser_priv {
 	struct max_ser *ser;
@@ -1766,6 +1767,9 @@ int max_ser_probe(struct i2c_client *client, struct max_ser *ser)
 	struct device *dev = &client->dev;
 	struct max_ser_priv *priv;
 	int ret;
+
+	if (ser->ops->num_phys > MAX_SER_NUM_PHYS)
+		return -E2BIG;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
